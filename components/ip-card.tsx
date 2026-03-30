@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { Music, BookOpen, ImageIcon, ShoppingCart, ExternalLink, Video } from 'lucide-react'
+import { Music, BookOpen, ImageIcon, ShoppingCart, ExternalLink, Video, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { type IPAsset } from '@/lib/data'
 import { Button } from './ui/button'
@@ -74,6 +74,13 @@ export function IPCard({ asset, className }: IPCardProps) {
             <Icon className={cn('w-3 h-3', TYPE_COLOR[asset.type])} />
             <span className={TYPE_COLOR[asset.type]}>{asset.type}</span>
           </div>
+
+          {/* Metadata status warning */}
+          {(asset as any).metadataStatus === 'failed' && (
+            <div className="absolute top-3 right-3 flex items-center gap-1 rounded-full px-2 py-1 bg-amber-500/20 border border-amber-500/30 font-mono text-[9px] text-amber-400">
+              <AlertTriangle className="w-3 h-3" /> Metadata unavailable
+            </div>
+          )}
 
           {/* Story Protocol ID */}
           <div className="absolute bottom-3 left-3 right-3 font-mono text-[9px] text-white/60 truncate">

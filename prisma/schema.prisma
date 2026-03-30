@@ -17,3 +17,25 @@ model ReleaseQueue {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
+
+model LocalIPAsset {
+  id               String   @id @default(cuid())
+  storyProtocolId  String?  @unique // ipId from Story Protocol, null until on-chain
+  ownerAddress     String   // wallet address of the creator
+  title            String
+  description      String   @default("")
+  ipType           String   @default("music") // music, image, literature, video
+  mediaUrl         String   @default("")
+  imageUrl         String   @default("")
+  metadataUri      String   @default("")
+  licenses         String   @default("Commercial") // comma-separated
+  royaltyRate      Int      @default(10)
+  crossmintId      String?  // Crossmint action ID returned on registration
+  tokenContract    String?
+  tokenId          String?
+  transactionHash  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([ownerAddress])
+}
