@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import db from '@/lib/database';
 
 export async function POST(req: Request) {
   try {
@@ -119,6 +120,28 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json();
+
+    // Persist to local DB for immediate visibility before subgraph indexes
+    try {
+      await db.localIPAsset.create({
+        data: {
+          ownerAddress: creatorAddress.toLowerCase(),
+          title,
+          description,
+          ipType,
+          mediaUrl: mediaUrl,
+          imageUrl: finalImageUrl,
+          metadataUri: '',
+          licenses,
+          royaltyRate: parseInt(royalty, 10) || 10,
+          crossmintId: data.id || data.actionId || null,
+        },
+      });
+    } catch (dbErr) {
+      // Log but don't fail the registration — Crossmint succeeded
+      console.error('Failed to persist IP asset locally:', dbErr);
+    }
+
     return NextResponse.json(data);
   } catch (error: any) {
     console.error("Register IP Route Error:", error);

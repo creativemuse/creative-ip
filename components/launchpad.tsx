@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { graphQLClient, GET_USER_IP_ASSETS, mapSubgraphAssetToIPAsset } from '@/lib/graphql'
+import { graphQLClient, GET_USER_IP_ASSETS, mapSubgraphAssetToIPAsset, MetadataStatus } from '@/lib/graphql'
 
 const RECENT_ACTIVITY: { action: string, asset: string, by: string, time: string, amount: string | null }[] = [] // Empty activity stream for production MVP
 
@@ -37,18 +37,61 @@ export function Launchpad() {
       }
       setLoading(true)
       try {
-        const data: any = await graphQLClient.request(GET_USER_IP_ASSETS, {
-          first: 10,
-          skip: 0
-        })
-        if (data.ipregistereds) {
-          const assets = await Promise.all(
-            data.ipregistereds.map((item: any) => mapSubgraphAssetToIPAsset(item))
-          )
-          setMyPortfolio(assets)
+        const ownerAddress = wallet.address.toLowerCase()
+
+        // Fetch from both subgraph and local DB in parallel
+        const [subgraphResult, localResult] = await Promise.allSettled([
+          graphQLClient.request(GET_USER_IP_ASSETS, {
+            first: 50,
+            skip: 0,
+            owner: ownerAddress,
+          }),
+          fetch(`/api/my-assets?owner=${encodeURIComponent(ownerAddress)}`).then(r => r.json()),
+        ])
+
+        // Map subgraph assets
+        let subgraphAssets: (IPAsset & { metadataStatus?: MetadataStatus })[] = []
+        if (subgraphResult.status === 'fulfilled') {
+          const data = subgraphResult.value as any
+          if (data.ipregistereds) {
+            subgraphAssets = await Promise.all(
+              data.ipregistereds.map((item: any) => mapSubgraphAssetToIPAsset(item))
+            )
+          }
+        } else {
+          console.error('Failed to fetch from Goldsky:', subgraphResult.reason)
         }
+
+        // Map local DB assets to IPAsset shape
+        let localAssets: (IPAsset & { metadataStatus?: MetadataStatus })[] = []
+        if (localResult.status === 'fulfilled' && localResult.value.assets) {
+          localAssets = localResult.value.assets.map((a: any) => ({
+            id: a.id,
+            storyProtocolId: a.storyProtocolId || '',
+            title: a.title,
+            creator: 'You',
+            creatorHandle: `${ownerAddress.substring(0, 6)}...${ownerAddress.substring(ownerAddress.length - 4)}`,
+            type: a.ipType || 'music',
+            coverImage: a.imageUrl || '/images/art-1.jpg',
+            description: a.description || '',
+            licenses: a.licenses ? a.licenses.split(',').map((s: string) => s.trim()) : ['Commercial'],
+            price: 0,
+            currency: 'USDC' as const,
+            royaltyRate: a.royaltyRate || 10,
+            registered: new Date(a.createdAt).toISOString().split('T')[0],
+            tags: ['On-Chain', 'Story Protocol'],
+            stats: { views: 0, licenses: 0, revenue: 0 },
+            metadataStatus: 'loaded' as MetadataStatus,
+            metadataURI: a.metadataUri || '',
+          }))
+        }
+
+        // Deduplicate: subgraph wins when storyProtocolId matches
+        const seenIds = new Set(subgraphAssets.map(a => a.storyProtocolId).filter(Boolean))
+        const uniqueLocal = localAssets.filter(a => !a.storyProtocolId || !seenIds.has(a.storyProtocolId))
+        setMyPortfolio([...subgraphAssets, ...uniqueLocal])
       } catch (err) {
-        console.error('Failed to fetch from Goldsky:', err)
+        console.error('Failed to fetch assets:', err)
       } finally {
         setLoading(false)
       }

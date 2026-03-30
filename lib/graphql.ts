@@ -28,8 +28,8 @@ export const GET_RECENT_IP_ASSETS = gql`
 `
 
 export const GET_USER_IP_ASSETS = gql`
-  query GetUserIPAssets($first: Int!, $skip: Int!) {
-    ipregistereds(first: $first, skip: $skip, orderBy: timestamp_, orderDirection: desc) {
+  query GetUserIPAssets($first: Int!, $skip: Int!, $owner: String!) {
+    ipregistereds(first: $first, skip: $skip, orderBy: timestamp_, orderDirection: desc, where: { caller: $owner }) {
       id
       ipId
       chainId
@@ -38,6 +38,7 @@ export const GET_USER_IP_ASSETS = gql`
       uri
       timestamp_
       transactionHash_
+      caller
     }
   }
 `
@@ -57,22 +58,44 @@ export const GET_IP_ASSET_BY_ID = gql`
   }
 `
 
+export type MetadataStatus = 'loading' | 'loaded' | 'failed'
+
+async function fetchWithRetry(url: string, retries = 3, baseDelayMs = 500): Promise<Response> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch(url)
+    if (res.ok) return res
+    if (attempt < retries - 1) {
+      await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)))
+    }
+  }
+  // Final attempt — let caller handle the error
+  return fetch(url)
+}
+
 // Helper to map the raw Subgraph data to our application's IPAsset interface
-export async function mapSubgraphAssetToIPAsset(subgraphData: any): Promise<IPAsset> {
+export async function mapSubgraphAssetToIPAsset(subgraphData: any): Promise<IPAsset & { metadataStatus: MetadataStatus }> {
   // Extract block timestamp safely (converting seconds to ms if needed)
   const dateObj = new Date(Number(subgraphData.timestamp_) * 1000)
 
   let metadata: any = null
+  let metadataStatus: MetadataStatus = 'loading'
   if (subgraphData.uri) {
     try {
       const url = resolveGroveURI(subgraphData.uri)
       if (url) {
-        const res = await fetch(url)
+        const res = await fetchWithRetry(url)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         metadata = await res.json()
+        metadataStatus = 'loaded'
+      } else {
+        metadataStatus = 'failed'
       }
     } catch (e) {
       console.warn('Failed to fetch metadata from Grove:', e)
+      metadataStatus = 'failed'
     }
+  } else {
+    metadataStatus = 'failed'
   }
 
   const getAttr = (key: string) => metadata?.attributes?.find((a: any) => a.key === key)?.value
@@ -94,6 +117,7 @@ export async function mapSubgraphAssetToIPAsset(subgraphData: any): Promise<IPAs
     registered: dateObj.toISOString().split('T')[0],
     tags: metadata?.tags || ['On-Chain', 'Story Protocol'],
     stats: { views: 0, licenses: 0, revenue: 0 },
+    metadataStatus,
     // Retaining raw mapping data mapping
     metadataURI: subgraphData.uri,
     transactionHash: subgraphData.transactionHash_,
